@@ -10,21 +10,24 @@ struct MaterialData {
 
 @group(2) @binding(0) var<uniform> material: MaterialData;
 
-const MAX_ITER: u32 = 100u;
+const MAX_ITER: u32 = 1000u;
+const ESCAPE_RADIUS: f32 = 100.0;
 
-fn mandelbrot(c: vec2<f32>, z0: vec2<f32>) -> u32 {
+fn mandelbrot(c: vec2<f32>, z0: vec2<f32>) -> f32 {
     // マンデルブロ集合の点が発散するかどうかを判定します
-    // 発散までにかかる反復回数を返します
+    // 発散までにかかる反復回数から脱出時の速度を考慮して補正された値を返します
     var z = z0;
     var i = 0u;
     for (; i < MAX_ITER; i ++) {
-        if length(z) > 10000.0 {
-            break;
-        }
         // z <- z**2 + c
-        z = vec2(z.x*z.x - z.y*z.y + c.x, 2*z.x*z.y + c.y);
+        z = vec2(z.x*z.x - z.y*z.y, 2*z.x*z.y) + c;
+        let z_len2 = dot(z, z);
+        if z_len2 > ESCAPE_RADIUS * ESCAPE_RADIUS {
+            let log_zn = log2(z_len2) / 2.0;
+            return f32(i) + 1.0 - log2(log_zn);
+        }
     }
-    return i;
+    return f32(MAX_ITER);
 }
 
 @fragment
@@ -41,17 +44,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         material.offset.y - (uv.y - 0.5) * material.range
     );
 
-    // --------------------
-
     // マンデルブロ集合の反復回数を計算
     let iter = mandelbrot(c, vec2(0.0, 0.0));
-
-    // 色を決定（少し見やすく調整）
-    if (iter == MAX_ITER) {
-        return vec4<f32>(0.0, 0.0, 0.0, 1.0); // 収束したら黒
+    if iter == f32(MAX_ITER) {
+        return vec4(0.0, 0.0, 0.0, 1.0); // 集合に属する点は黒
     }
-    let color_value = sin((vec3f(f32(iter)/f32(MAX_ITER))*vec3f(0.5, 2.5, 3.5)+vec3f(0.5))*PI);
-    // ガンマ補正っぽいことをして少し明るく見やすく
-    // let bright_color = pow(color_value, 0.5);
-    return vec4(color_value, 1.0);
+
+    let color_value = pow(iter / f32(MAX_ITER), 0.6);
+    return vec4(vec3(color_value), 1.0);
 }

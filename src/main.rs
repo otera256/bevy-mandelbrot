@@ -60,8 +60,8 @@ fn setup(
         ScreenQuad,
         // 自作マテリアル
         MeshMaterial2d(materials.add(MandelbrotMaterial {
-            offset: Vec2::new(-0.5, 0.0), // 初期位置を少し左にずらす
-            range: 4.0,
+            offset: Vec2::new(-0.7, 0.0), // 初期位置を少し左にずらす
+            range: 2.5,
             ratio: 1.0, // 初期値（ウィンドウサイズに合わせて更新されます）
         })),
         // 位置（Zはカメラより奥であればOK。2Dなので0.0でも-1.0でも大差ありません）
@@ -83,8 +83,8 @@ fn update_material(
     // ハンドルを使って、アセットストレージから実際のマテリアルデータを取得（可変）
     if let Some(material) = material_assets.get_mut(material_handle) {
         // 時間経過を取得 (秒)
-        let t = time.elapsed_secs();
-        material.range = 2.0f32.powf(t * -0.1); // 少しゆっくりめに
+        // let t = time.elapsed_secs();
+        // material.range = 2.0f32.powf(t * -0.1); // 少しゆっくりめに
 
         // ここで変更した material の内容は、Bevyが自動的に検知して
         // 次の描画フレームの前にGPUに転送してくれます。
