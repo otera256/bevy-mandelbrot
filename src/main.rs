@@ -9,12 +9,14 @@ use bevy::{
 // AsBindGroupをderiveすることで、GPU側のバッファ構成を自動生成します。
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 struct MandelbrotMaterial {
-    // ここに将来的に、色、ズーム率、オフセット位置などのパラメータを追加します。
-    // 例:
-    // #[uniform(0)]
-    // color: LinearRgba,
-    // #[uniform(1)]
-    // zoom_center: Vec2,
+    #[uniform(0)]
+    offset: Vec2, // 複素平面上の中心座標 (WGSL側では vec2<f32> になる)
+
+    #[uniform(0)]
+    range: f32,  // 複素平面上の表示範囲の高さ (WGSL側では f32 になる)
+
+    #[uniform(0)]
+    ratio: f32,   // ウィンドウのアスペクト比 (WGSL側では f32 になる)
 }
 
 // Material2dトレイトを実装して、どのシェーダーファイルを使うか指定します。
@@ -33,7 +35,10 @@ fn main() {
             Material2dPlugin::<MandelbrotMaterial>::default()
         ))
         .add_systems(Startup, (setup, resize_quad_to_window).chain())
-        .add_systems(Update, resize_quad_to_window.run_if(on_message::<WindowResized>))
+        .add_systems(Update, (
+            update_material,
+            resize_quad_to_window.run_if(on_message::<WindowResized>)
+        ))
         .run();
 }
 
@@ -55,11 +60,35 @@ fn setup(
         ScreenQuad,
         // 自作マテリアル
         MeshMaterial2d(materials.add(MandelbrotMaterial {
-            // 初期パラメータがあればここで設定
+            offset: Vec2::new(-0.5, 0.0), // 初期位置を少し左にずらす
+            range: 4.0,
+            ratio: 1.0, // 初期値（ウィンドウサイズに合わせて更新されます）
         })),
         // 位置（Zはカメラより奥であればOK。2Dなので0.0でも-1.0でも大差ありません）
         Transform::from_xyz(0.0, 0.0, -1.0),
     ));
+}
+
+// マテリアルのパラメータを時間経過で更新するシステム
+fn update_material(
+    time: Res<Time>,
+    // 現在シーンで使われている MandelbrotMaterial のハンドルを探すクエリ
+    material_handle_query: Query<&MeshMaterial2d<MandelbrotMaterial>>,
+    // マテリアルの実体データが格納されているアセットストレージへの可変アクセス
+    mut material_assets: ResMut<Assets<MandelbrotMaterial>>,
+) {
+    // シーンにマテリアルがなければ何もしない
+    let Ok(material_handle) = material_handle_query.single() else { return; };
+
+    // ハンドルを使って、アセットストレージから実際のマテリアルデータを取得（可変）
+    if let Some(material) = material_assets.get_mut(material_handle) {
+        // 時間経過を取得 (秒)
+        let t = time.elapsed_secs();
+        material.range = 2.0f32.powf(t * -0.1); // 少しゆっくりめに
+
+        // ここで変更した material の内容は、Bevyが自動的に検知して
+        // 次の描画フレームの前にGPUに転送してくれます。
+    }
 }
 
 fn resize_quad_to_window(
@@ -67,6 +96,10 @@ fn resize_quad_to_window(
     window: Query<&Window>,
     // 目印を付けたメッシュのTransformを操作するクエリ
     mut quad_query: Query<&mut Transform, With<ScreenQuad>>,
+        // 現在シーンで使われている MandelbrotMaterial のハンドルを探すクエリ
+    material_handle_query: Query<&MeshMaterial2d<MandelbrotMaterial>>,
+    // マテリアルの実体データが格納されているアセットストレージへの可変アクセス
+    mut material_assets: ResMut<Assets<MandelbrotMaterial>>,
 ) {
 
     let window = window.single().expect("Windows does not exist");
@@ -81,4 +114,14 @@ fn resize_quad_to_window(
     transform.scale = Vec3::new(width, height, 1.0);
 
     info!("ScreenQuad resized to: {}x{}", width, height);
+
+    // シーンにマテリアルがなければ何もしない
+    let Ok(material_handle) = material_handle_query.single() else { return; };
+
+    // ハンドルを使って、アセットストレージから実際のマテリアルデータを取得（可変）
+    if let Some(material) = material_assets.get_mut(material_handle) {
+        // ウィンドウのアスペクト比を計算
+        let aspect_ratio = width / height;
+        material.ratio = aspect_ratio;
+    }
 }
