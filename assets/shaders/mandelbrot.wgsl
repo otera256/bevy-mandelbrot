@@ -50,6 +50,13 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4(0.0, 0.0, 0.0, 1.0); // 集合に属する点は黒
     }
 
-    let color_value = pow(iter / f32(MAX_ITER), 0.6);
-    return vec4(vec3(color_value), 1.0);
+    let alpha = log2(iter / f32(MAX_ITER) + 1.0);
+    let shift = 0.0;
+    
+    return vec4(
+        sin((6.0 * alpha - 0.2 + shift) * PI),
+        sin((6.0 * alpha + 0.0 + shift) * PI),
+        sin((6.0 * alpha + 0.2 + shift) * PI),
+        1.0
+    );
 }
