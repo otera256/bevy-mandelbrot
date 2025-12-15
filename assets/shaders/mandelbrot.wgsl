@@ -73,7 +73,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var color = vec4(0.0);
     for (var i = 0u; i < 4u; i = i + 1u) {
         let c = c0 + samples[i];
-        color = color + get_color(c, vec2(0.0, 0.0));
+        color = color + get_color(c, vec2(0.0));
     }
     color = color / 4.0;
     return color;

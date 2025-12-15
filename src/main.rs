@@ -1,8 +1,5 @@
 use bevy::{
-    prelude::*,
-    reflect::TypePath,
-    render::render_resource::AsBindGroup,
-    shader::ShaderRef, sprite_render::{Material2d, Material2dPlugin}, window::WindowResized,
+    input::mouse::MouseWheel, prelude::*, reflect::TypePath, render::render_resource::AsBindGroup, shader::ShaderRef, sprite_render::{Material2d, Material2dPlugin}, window::WindowResized
 };
 
 // シェーダーに渡すデータを保持する構造体
@@ -80,6 +77,8 @@ fn main() {
             resize_quad_to_window.run_if(on_message::<WindowResized>),
         ))
         .add_systems(Update, (
+            zoom,
+            drag,
             update_material,
         ))
         .run();
@@ -140,10 +139,49 @@ fn resize_quad_to_window(
     let width = window.width();
     let height = window.height();
 
-    // 【重要】メッシュのスケールをウィンドウサイズに設定
+    // メッシュのスケールをウィンドウサイズに設定
     // 元が1x1なので、これで幅width、高さheightのメッシュになります。
     transform.scale = Vec3::new(width, height, 1.0);
 
     info!("ScreenQuad resized to: {}x{}", width, height);
     mandelbrot_params.window_size = Vec2::new(width, height);
+}
+
+fn zoom(
+    mut msgr_scroll: MessageReader<MouseWheel>,
+    window: Single<&Window>,
+    mut mandelbrot_params: ResMut<MandelbrotParams>,
+){
+    use bevy::input::mouse::MouseScrollUnit;
+    let Some(mouse_pos) = window.cursor_position() else { return; };
+    let world_mouse_pos = Vec2::new(
+        (mouse_pos.x / window.width() - 0.5) * mandelbrot_params.range * mandelbrot_params.aspect_ratio() + mandelbrot_params.offset.x,
+        (0.5 - mouse_pos.y / window.height()) * mandelbrot_params.range + mandelbrot_params.offset.y,
+    );
+    for msg in msgr_scroll.read() {
+        let scroll_amount = match msg.unit {
+            MouseScrollUnit::Line => msg.y * 0.1,
+            MouseScrollUnit::Pixel => msg.y * 0.001,
+        };
+        let zoom_factor = 1.0 - scroll_amount;
+        mandelbrot_params.range *= zoom_factor;
+        mandelbrot_params.offset = world_mouse_pos + (mandelbrot_params.offset - world_mouse_pos) * zoom_factor;
+    }
+}
+
+fn drag(
+    mut msgr_cursor: MessageReader<CursorMoved>,
+    window: Single<&Window>,
+    butttons: Res<ButtonInput<MouseButton>>,
+    mut mandelbrot_params: ResMut<MandelbrotParams>,
+){
+    // マウス左ボタンが押されていない場合は何もしない
+    if !butttons.pressed(MouseButton::Left) {
+        return;
+    }
+    for msg in msgr_cursor.read() {
+        let Some(delta) = msg.delta else { continue; };
+        mandelbrot_params.offset.x -= delta.x / window.width() * mandelbrot_params.range * mandelbrot_params.aspect_ratio();
+        mandelbrot_params.offset.y += delta.y / window.height() * mandelbrot_params.range;
+    }
 }
