@@ -5,7 +5,8 @@ const PI: f32 = 3.141592653589793;
 struct MaterialData {
     offset: vec2<f32>,
     range: f32,
-    ratio: f32,
+    aspect_ratio: f32,
+    pixel_size: f32,
 };
 
 @group(2) @binding(0) var<uniform> material: MaterialData;
@@ -30,22 +31,8 @@ fn mandelbrot(c: vec2<f32>, z0: vec2<f32>) -> f32 {
     return f32(MAX_ITER);
 }
 
-@fragment
-fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    // 画素の位置を取得
-    // (0, 0) が左上、(1, 1) が右下のUV座標系
-    let uv: vec2<f32> = in.uv;
-
-    // UV座標を複素平面上の座標に変換
-    // material.offset が中心座標、material.range が表示範囲の高さ、material.ratio がアスペクト比
-    let aspect_ratio = material.ratio;
-    let c = vec2(
-        material.offset.x + (uv.x - 0.5) * material.range * aspect_ratio,
-        material.offset.y - (uv.y - 0.5) * material.range
-    );
-
-    // マンデルブロ集合の反復回数を計算
-    let iter = mandelbrot(c, vec2(0.0, 0.0));
+fn get_color(c: vec2<f32>, z0: vec2<f32>) -> vec4<f32> {
+    let iter = mandelbrot(c, z0);
     if iter == f32(MAX_ITER) {
         return vec4(0.0, 0.0, 0.0, 1.0); // 集合に属する点は黒
     }
@@ -59,4 +46,35 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         sin((6.0 * alpha + 0.2 + shift) * PI),
         1.0
     );
+}
+
+@fragment
+fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+    // 画素の位置を取得
+    // (0, 0) が左上、(1, 1) が右下のUV座標系
+    let uv: vec2<f32> = in.uv;
+
+    // UV座標を複素平面上の座標に変換
+    // material.offset が中心座標、material.range が表示範囲の高さ、material.ratio がアスペクト比
+    let aspect_ratio = material.aspect_ratio;
+    let c0 = vec2(
+        material.offset.x + (uv.x - 0.5) * material.range * aspect_ratio,
+        material.offset.y - (uv.y - 0.5) * material.range
+    );
+
+    // アンチエイリアスのために4サンプルを取得して平均化
+    let pixel_size = material.pixel_size;
+    let samples = array<vec2<f32>, 4>(
+        vec2(-0.25 * pixel_size, -0.25 * pixel_size),
+        vec2( 0.25 * pixel_size, -0.25 * pixel_size),
+        vec2(-0.25 * pixel_size,  0.25 * pixel_size),
+        vec2( 0.25 * pixel_size,  0.25 * pixel_size),
+    );
+    var color = vec4(0.0);
+    for (var i = 0u; i < 4u; i = i + 1u) {
+        let c = c0 + samples[i];
+        color = color + get_color(c, vec2(0.0, 0.0));
+    }
+    color = color / 4.0;
+    return color;
 }
