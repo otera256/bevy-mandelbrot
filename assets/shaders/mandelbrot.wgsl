@@ -31,19 +31,18 @@ fn mandelbrot(c: vec2<f32>, z0: vec2<f32>) -> f32 {
     return f32(MAX_ITER);
 }
 
-fn get_color(c: vec2<f32>, z0: vec2<f32>) -> vec4<f32> {
+fn get_color(c: vec2<f32>, z0: vec2<f32>, range: f32) -> vec4<f32> {
     let iter = mandelbrot(c, z0);
     if iter == f32(MAX_ITER) {
         return vec4(0.0, 0.0, 0.0, 1.0); // 集合に属する点は黒
     }
 
-    let alpha = log2(iter / f32(MAX_ITER) + 1.0);
-    let shift = 0.0;
+    let alpha = pow(iter / f32(MAX_ITER) , -log2(range) * 0.1 + 0.6);
     
     return vec4(
-        sin((6.0 * alpha - 0.2 + shift) * PI),
-        sin((6.0 * alpha + 0.0 + shift) * PI),
-        sin((6.0 * alpha + 0.2 + shift) * PI),
+        sin((2.0 * alpha + 0.6) * PI),
+        sin((2.0 * alpha + 0.0) * PI),
+        sin((2.0 * alpha - 0.6) * PI),
         1.0
     );
 }
@@ -73,7 +72,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var color = vec4(0.0);
     for (var i = 0u; i < 4u; i = i + 1u) {
         let c = c0 + samples[i];
-        color = color + get_color(c, vec2(0.0));
+        color = color + get_color(c, vec2(0.0), material.range);
     }
     color = color / 4.0;
     return color;
