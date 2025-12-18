@@ -1,13 +1,16 @@
+use std::iter;
+
 use bevy::{
-    input::mouse::MouseWheel, prelude::*, reflect::TypePath, render::render_resource::AsBindGroup, shader::ShaderRef, sprite_render::{Material2d, Material2dPlugin}, window::WindowResized
+    input::mouse::MouseWheel, prelude::*, reflect::TypePath, render::{render_resource::AsBindGroup, storage::ShaderStorageBuffer}, shader::ShaderRef, sprite_render::{Material2d, Material2dPlugin}, window::WindowResized
 };
+use num_bigfloat::{BigFloat, ZERO};
 
 // シェーダーに渡すデータを保持する構造体
 // AsBindGroupをderiveすることで、GPU側のバッファ構成を自動生成します。
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone, Default)]
 struct MandelbrotMaterial {
     #[uniform(0)]
-    offset: Vec2, // 複素平面上の中心座標 (WGSL側では vec2<f32> になる)
+    num_iterations: u32,  // マンデルブロ集合の計算に使う反復回数
 
     #[uniform(0)]
     range: f32,  // 複素平面上の表示範囲の高さ (WGSL側では f32 になる)
@@ -17,6 +20,9 @@ struct MandelbrotMaterial {
 
     #[uniform(0)]
     pixel_size: f32,   // 1ピクセルあたりの複素平面上の距離 (WGSL側では f32 になる)
+
+    #[storage(1, read_only)]
+    base_orbit: Handle<ShaderStorageBuffer>
 }
 
 // Material2dトレイトを実装して、どのシェーダーファイルを使うか指定します。
@@ -30,17 +36,21 @@ impl Material2d for MandelbrotMaterial {
 impl MandelbrotMaterial {
     // マテリアルのパラメータを一括で更新するメソッド
     fn update_params(&mut self, params: &MandelbrotParams) {
-        self.offset = params.offset;
+        self.num_iterations = params.num_iterations;
         self.range = params.range;
         self.aspect_ratio = params.aspect_ratio();
         self.pixel_size = params.pixel_size();
     }
 }
 
+#[derive(Resource, Debug, Clone, Default)]
+struct MandelbrotMaterialHandle(Handle<MandelbrotMaterial>);
+
 // いちいちmaterialにアクセスしないといけないのは面倒なので、CPU側の処理をまとめるためのResourceを用意する
 #[derive(Resource, Debug, Clone)]
 struct MandelbrotParams {
-    offset: Vec2,
+    num_iterations: u32,
+    center: [BigFloat; 2],
     range: f32,
     window_size: Vec2,
 }
@@ -48,7 +58,8 @@ struct MandelbrotParams {
 impl Default for MandelbrotParams {
     fn default() -> Self {
         Self {
-            offset: Vec2::new(-0.7, 0.0),
+            num_iterations: 1000,
+            center: [BigFloat::from_f64(-0.5), BigFloat::from_f64(0.0)],
             range: 2.5,
             window_size: Vec2::new(800.0, 600.0),
         }
@@ -65,13 +76,13 @@ impl MandelbrotParams {
 }
 
 fn main() {
-    println!("Hello, world!");
     App::new()
         .add_plugins((
             DefaultPlugins,
             Material2dPlugin::<MandelbrotMaterial>::default()
         ))
         .init_resource::<MandelbrotParams>()
+        .init_resource::<MandelbrotMaterialHandle>()
         .add_systems(Startup, (setup, resize_quad_to_window).chain())
         .add_systems(PreUpdate, (
             resize_quad_to_window.run_if(on_message::<WindowResized>),
@@ -92,36 +103,64 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     // 自作したマテリアルのアセットリソース
     mut materials: ResMut<Assets<MandelbrotMaterial>>,
+    mut mandelbrot_material_handle: ResMut<MandelbrotMaterialHandle>,
+    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
 ) {
-    // 1. 2Dカメラを配置
     commands.spawn(Camera2d);
 
+    let base_orbit_buffer = buffers.add(ShaderStorageBuffer::from(vec![
+        Vec2::ZERO;
+        1000  // 初期値として1000要素分のゼロベクトルを用意しておく
+    ]));
+
+    let mut mandelbrot_material = MandelbrotMaterial::default();
+    mandelbrot_material.base_orbit = base_orbit_buffer;
+
+    let material_handle = materials.add(mandelbrot_material);
+
+    mandelbrot_material_handle.0 = material_handle.clone();
+
     commands.spawn((
-        // メッシュ
         Mesh2d(meshes.add(Rectangle::default())),
         ScreenQuad,
         // 自作マテリアル
-        MeshMaterial2d(materials.add(MandelbrotMaterial::default())),
-        // 位置（Zはカメラより奥であればOK。2Dなので0.0でも-1.0でも大差ありません）
+        MeshMaterial2d(material_handle),
         Transform::from_xyz(0.0, 0.0, -1.0),
     ));
+
 }
 
 // マテリアルのパラメータを時間経過で更新するシステム
 fn update_material(
     params: Res<MandelbrotParams>,
-    // 現在シーンで使われている MandelbrotMaterial のハンドルを探すクエリ
-    material_handle_query: Query<&MeshMaterial2d<MandelbrotMaterial>>,
+    mandelblot_material_handle: Res<MandelbrotMaterialHandle>,
     // マテリアルの実体データが格納されているアセットストレージへの可変アクセス
     mut material_assets: ResMut<Assets<MandelbrotMaterial>>,
+    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
 ) {
-    // シーンにマテリアルがなければ何もしない
-    let Ok(material_handle) = material_handle_query.single() else { return; };
-
     // ハンドルを使って、アセットストレージから実際のマテリアルデータを取得（可変）
-    if let Some(material) = material_assets.get_mut(material_handle) {
-        material.update_params(&params);
-    }
+    let Some(material) = material_assets.get_mut(&mandelblot_material_handle.0) else {
+        return;
+    };
+    material.update_params(&params);
+    let Some(buffer) = buffers.get_mut(&material.base_orbit) else {
+        return;
+    };
+    buffer.set_data(
+        iter::once([ZERO; 2]).chain(
+            (0..params.num_iterations)
+                .scan([ZERO; 2], |z, _| {
+                    let x = z[0] * z[0] - z[1] * z[1] + params.center[0];
+                    let y = BigFloat::parse("2.0").unwrap() * z[0] * z[1] + params.center[1];
+                    *z = [x, y];
+                    Some(*z)
+                })
+            )
+            .map(|[x, y]|
+                Vec2::new(x.to_f32(), y.to_f32())
+            )
+            .collect::<Vec<_>>()
+    )
 }
 
 fn resize_quad_to_window(
@@ -149,24 +188,37 @@ fn resize_quad_to_window(
 
 fn zoom(
     mut msgr_scroll: MessageReader<MouseWheel>,
+    keys: Res<ButtonInput<KeyCode>>,
     window: Single<&Window>,
     mut mandelbrot_params: ResMut<MandelbrotParams>,
 ){
     use bevy::input::mouse::MouseScrollUnit;
     let Some(mouse_pos) = window.cursor_position() else { return; };
-    let world_mouse_pos = Vec2::new(
-        (mouse_pos.x / window.width() - 0.5) * mandelbrot_params.range * mandelbrot_params.aspect_ratio() + mandelbrot_params.offset.x,
-        (0.5 - mouse_pos.y / window.height()) * mandelbrot_params.range + mandelbrot_params.offset.y,
-    );
+    let world_mouse_pos = [
+        BigFloat::from_f32((mouse_pos.x / window.width() - 0.5) * (mandelbrot_params.range * mandelbrot_params.aspect_ratio())) + mandelbrot_params.center[0],
+        BigFloat::from_f32((0.5 - mouse_pos.y / window.height()) * mandelbrot_params.range) + mandelbrot_params.center[1],
+    ];
+    let mut zoom_factor = 1.0;
     for msg in msgr_scroll.read() {
         let scroll_amount = match msg.unit {
             MouseScrollUnit::Line => msg.y * 0.1,
             MouseScrollUnit::Pixel => msg.y * 0.001,
         };
-        let zoom_factor = 1.0 - scroll_amount;
-        mandelbrot_params.range *= zoom_factor;
-        mandelbrot_params.offset = world_mouse_pos + (mandelbrot_params.offset - world_mouse_pos) * zoom_factor;
+        zoom_factor *= 1.0 - scroll_amount;
     }
+    if keys.pressed(KeyCode::KeyZ) {
+        zoom_factor *= 0.98;
+    }
+    if keys.pressed(KeyCode::KeyX) {
+        zoom_factor *= 1.02;
+    }
+    if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+        zoom_factor = zoom_factor.powf(2.5);
+    }
+    mandelbrot_params.range *= zoom_factor;
+    let zoom_factor = BigFloat::from_f32(zoom_factor);
+    mandelbrot_params.center[0] = world_mouse_pos[0] - (world_mouse_pos[0] - mandelbrot_params.center[0]) * zoom_factor;
+    mandelbrot_params.center[1] = world_mouse_pos[1] - (world_mouse_pos[1] - mandelbrot_params.center[1]) * zoom_factor;
 }
 
 fn drag(
@@ -181,7 +233,9 @@ fn drag(
     }
     for msg in msgr_cursor.read() {
         let Some(delta) = msg.delta else { continue; };
-        mandelbrot_params.offset.x -= delta.x / window.width() * mandelbrot_params.range * mandelbrot_params.aspect_ratio();
-        mandelbrot_params.offset.y += delta.y / window.height() * mandelbrot_params.range;
+        let dx = BigFloat::from_f32(-(delta.x / window.width()) * (mandelbrot_params.range * mandelbrot_params.aspect_ratio()));
+        let dy = BigFloat::from_f32((delta.y / window.height()) * mandelbrot_params.range);
+        mandelbrot_params.center[0] += dx;
+        mandelbrot_params.center[1] += dy;
     }
 }
