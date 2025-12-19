@@ -3,6 +3,7 @@ use std::iter;
 use bevy::{
     input::mouse::MouseWheel, prelude::*, reflect::TypePath, render::{render_resource::AsBindGroup, storage::ShaderStorageBuffer}, shader::ShaderRef, sprite_render::{Material2d, Material2dPlugin}, window::WindowResized
 };
+use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use num_bigfloat::{BigFloat, ZERO};
 
 // シェーダーに渡すデータを保持する構造体
@@ -79,7 +80,8 @@ fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins,
-            Material2dPlugin::<MandelbrotMaterial>::default()
+            Material2dPlugin::<MandelbrotMaterial>::default(),
+            EguiPlugin::default(),
         ))
         .init_resource::<MandelbrotParams>()
         .init_resource::<MandelbrotMaterialHandle>()
@@ -92,6 +94,7 @@ fn main() {
             drag,
             update_material,
         ))
+        .add_systems(EguiPrimaryContextPass, ui_system)
         .run();
 }
 
@@ -238,4 +241,79 @@ fn drag(
         mandelbrot_params.center[0] += dx;
         mandelbrot_params.center[1] += dy;
     }
+}
+
+#[derive(Default)]
+struct UiState {
+    x_str: String,
+    y_str: String,
+    last_center: [BigFloat; 2],
+    range_str: String,
+    last_range: f32,
+}
+
+fn ui_system(
+    mut contexts: EguiContexts,
+    mut params: ResMut<MandelbrotParams>,
+    mut state: Local<UiState>,
+) -> Result {
+    // Check for external changes (e.g. mouse drag)
+    if params.center != state.last_center {
+        state.x_str = format!("{:.30}", params.center[0]);
+        state.y_str = format!("{:.30}", params.center[1]);
+        state.last_center = params.center.clone();
+    }
+    if params.range != state.last_range {
+        state.range_str = format!("{:.30}", params.range);
+        state.last_range = params.range;
+    }
+
+    egui::Window::new("Mandelbrot Settings").show(contexts.ctx_mut()?, |ui| {
+        ui.label("Center Position");
+        
+        // X Coordinate
+        ui.horizontal(|ui| {
+            ui.label("Real:");
+            if ui.add(egui::TextEdit::singleline(&mut state.x_str)).changed() {
+                if let Some(val) = BigFloat::parse(&state.x_str) {
+                    params.center[0] = val;
+                    state.last_center[0] = params.center[0].clone();
+                }
+            }
+        });
+
+        // Y Coordinate
+        ui.horizontal(|ui| {
+            ui.label("Imag:");
+            if ui.add(egui::TextEdit::singleline(&mut state.y_str)).changed() {
+                if let Some(val) = BigFloat::parse(&state.y_str) {
+                    params.center[1] = val;
+                    state.last_center[1] = params.center[1].clone();
+                }
+            }
+        });
+
+        ui.separator();
+
+        ui.label("Zoom (Range)");
+        if ui.add(egui::TextEdit::singleline(&mut state.range_str)).changed() {
+            if let Ok(val) = state.range_str.parse::<f32>() {
+                params.range = val;
+                state.last_range = params.range;
+            }
+        }
+
+        ui.separator();
+
+        ui.label("Iterations");
+        ui.add(egui::Slider::new(&mut params.num_iterations, 10..=10000).text("Iterations"));
+        
+        if ui.button("Reset").clicked() {
+            let default = MandelbrotParams::default();
+            params.center = default.center;
+            params.range = default.range;
+            params.num_iterations = default.num_iterations;
+        }
+    });
+    Ok(())
 }
