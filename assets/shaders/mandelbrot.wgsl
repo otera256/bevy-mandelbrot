@@ -62,14 +62,44 @@ fn get_color(dc: vec2<f32>, range: f32) -> vec4<f32> {
         return vec4(0.0, 0.0, 0.0, 1.0); // 集合に属する点は黒
     }
 
-    let alpha = pow(iter / f32(material.num_iterations) , -log2(range) * 0.15 + 0.6);
-    
+    let s = iter / f32(material.num_iterations);
+    let v = pow(s, log2(range) * -0.1 + 0.5);
+    // HSV Coloring
+    // let hue = 3600.0 * v % 360.0;
+    // let saturation = 0.8;
+    // let value = (cos(PI * v) * 0.5 + 0.5) * 0.8 + 0.2;
+    // return vec4(hsv2rgb(vec3(hue, saturation, value)), 1.0);
+
+    // Cyclic Cosine Coloring
+    let alpha = log2(s * 7.0 + 1.0);
     return vec4(
-        sin((2.0 * alpha + 0.6) * PI),
-        sin((2.0 * alpha + 0.0) * PI),
-        sin((2.0 * alpha - 0.6) * PI),
+        0.5 + 0.5 * cos(PI *  (2.0 * alpha - vec3(1.0, 0.75, 0.5))),
         1.0
     );
+}
+
+// HSVからRGBへの変換
+// hsv.x: Hue (0-360), hsv.y: Saturation (0-1), hsv.z: Value (0-1)
+fn hsv2rgb(hsv: vec3<f32>) -> vec3<f32> {
+    let hue_sector = hsv.x / 60.0;
+    let c = hsv.z * hsv.y;
+    let x = c * (1.0 - abs(hue_sector % 2.0 - 1.0));
+    let m = hsv.z - c;
+    var rgb = vec3<f32>(0.0);
+    if hue_sector < 1.0 {
+        rgb = vec3(c, x, 0.0);
+    } else if hue_sector < 2.0 {
+        rgb = vec3(x, c, 0.0);
+    } else if hue_sector < 3.0 {
+        rgb = vec3(0.0, c, x);
+    } else if hue_sector < 4.0 {
+        rgb = vec3(0.0, x, c);
+    } else if hue_sector < 5.0 {
+        rgb = vec3(x, 0.0, c);
+    } else {
+        rgb = vec3(c, 0.0, x);
+    }
+    return rgb + vec3(m);
 }
 
 @fragment
