@@ -61,7 +61,6 @@ fn get_color(dc: vec2<f32>, range: f32) -> vec4<f32> {
     if iter == f32(material.num_iterations) {
         return vec4(0.0, 0.0, 0.0, 1.0); // 集合に属する点は黒
     }
-
     let s = iter / f32(material.num_iterations);
     let v = pow(s, log2(range) * -0.1 + 0.5);
     // HSV Coloring
@@ -71,7 +70,7 @@ fn get_color(dc: vec2<f32>, range: f32) -> vec4<f32> {
     // return vec4(hsv2rgb(vec3(hue, saturation, value)), 1.0);
 
     // Cyclic Cosine Coloring
-    let alpha = log2(s * 7.0 + 1.0);
+    let alpha = log2(s * 63.0 + 1.0);
     return vec4(
         0.5 + 0.5 * cos(PI *  (2.0 * alpha - vec3(1.0, 0.75, 0.5))),
         1.0
